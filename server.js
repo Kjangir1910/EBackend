@@ -1,19 +1,18 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const puppeteer = require('puppeteer');
 const spellchecker = require('spellchecker');
 const { URL } = require('url');
+const cors = require('cors');
 
 const app = express();
 const PORT = 5000;
 
 // Middleware
 app.use(express.json());
-const cors = require('cors');
 app.use(cors());
 
-// Endpoint: /check-links
+// Endpoint 1: Check Links
 app.post('/check-links', async (req, res) => {
     const { url } = req.body;
 
@@ -37,14 +36,13 @@ app.post('/check-links', async (req, res) => {
             });
         });
 
-        // Check each link's status, redirect loop, and HTTPS
+        // Check each link's status, redirect loop, and HTTP/HTTPS
         const linkStatuses = await Promise.all(
             links.map(async (link) => {
                 try {
                     const linkUrl = new URL(link, url).href; // Resolve relative links
                     const isHttps = linkUrl.startsWith('https://');
                     const redirectHistory = [];
-                    let status;
                     let redirectLoop = false;
 
                     const response = await axios.get(linkUrl, {
@@ -58,9 +56,8 @@ app.post('/check-links', async (req, res) => {
                             }
                         },
                     });
-                    status = response.status;
 
-                    return { link: linkUrl, status, isHttps, redirectLoop };
+                    return { link: linkUrl, status: response.status, isHttps, redirectLoop };
                 } catch (error) {
                     return { link, status: error.response?.status || 'Error', isHttps: false, redirectLoop: false };
                 }
@@ -73,33 +70,35 @@ app.post('/check-links', async (req, res) => {
     }
 });
 
-// Endpoint: /check-spelling
+// Endpoint 2: Check Spelling
 app.post('/check-spelling', async (req, res) => {
     const { url } = req.body;
 
     try {
-        // Launch Puppeteer to fetch webpage content
-        const browser = await puppeteer.launch();
-        const page = await browser.newPage();
-        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        const { data } = await axios.get(url);
+        const $ = cheerio.load(data);
 
-        // Get text content from the page
-        const textContent = await page.evaluate(() => {
-            return document.body.innerText;
+        // Extract text from paragraphs and check for spelling errors
+        const spellingErrors = [];
+        $('p').each((_, el) => {
+            const text = $(el).text();
+            text.split(/\s+/).forEach((word) => {
+                if (spellchecker.isMisspelled(word)) {
+                    spellingErrors.push(word);
+                }
+            });
         });
-
-        await browser.close();
-
-        // Check for spelling errors
-        const words = textContent.split(/\s+/); // Split text into words
-        const spellingErrors = words.filter((word) => spellchecker.isMisspelled(word));
 
         res.json({ spellingErrors });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error fetching or analyzing the page content' });
+        res.status(500).json({ error: 'Error fetching page content' });
     }
 });
 
-// Start the server
+// Catch-All for 404 Errors
+app.use((req, res) => {
+    res.status(404).json({ error: `Endpoint not found: ${req.method} ${req.url}` });
+});
+
+// Start Server
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
