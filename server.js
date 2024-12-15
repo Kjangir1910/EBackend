@@ -8,11 +8,12 @@ const { URL } = require('url');
 const app = express();
 const PORT = 5000;
 
+// Middleware
 app.use(express.json());
 const cors = require('cors');
 app.use(cors());
 
-// Route for checking links and meta tags
+// Endpoint: /check-links
 app.post('/check-links', async (req, res) => {
     const { url } = req.body;
 
@@ -21,14 +22,13 @@ app.post('/check-links', async (req, res) => {
         const { data } = await axios.get(url);
         const $ = cheerio.load(data);
 
-        // Extract all links
+        // Extract all links and meta tags
         const links = [];
         $('a').each((_, el) => {
             const link = $(el).attr('href');
             if (link) links.push(link);
         });
 
-        // Extract meta tags
         const metaTags = [];
         $('meta').each((_, el) => {
             metaTags.push({
@@ -37,14 +37,30 @@ app.post('/check-links', async (req, res) => {
             });
         });
 
-        // Check link statuses
+        // Check each link's status, redirect loop, and HTTPS
         const linkStatuses = await Promise.all(
             links.map(async (link) => {
                 try {
                     const linkUrl = new URL(link, url).href; // Resolve relative links
                     const isHttps = linkUrl.startsWith('https://');
-                    const response = await axios.get(linkUrl, { validateStatus: () => true });
-                    return { link: linkUrl, status: response.status, isHttps, redirectLoop: false };
+                    const redirectHistory = [];
+                    let status;
+                    let redirectLoop = false;
+
+                    const response = await axios.get(linkUrl, {
+                        maxRedirects: 5, // Limit redirects to detect loops
+                        validateStatus: () => true, // Allow non-2xx statuses
+                        onRedirect: (res) => {
+                            if (redirectHistory.includes(res.headers.location)) {
+                                redirectLoop = true;
+                            } else {
+                                redirectHistory.push(res.headers.location);
+                            }
+                        },
+                    });
+                    status = response.status;
+
+                    return { link: linkUrl, status, isHttps, redirectLoop };
                 } catch (error) {
                     return { link, status: error.response?.status || 'Error', isHttps: false, redirectLoop: false };
                 }
@@ -57,40 +73,33 @@ app.post('/check-links', async (req, res) => {
     }
 });
 
-// Route for checking spelling errors
+// Endpoint: /check-spelling
 app.post('/check-spelling', async (req, res) => {
     const { url } = req.body;
 
     try {
-        // Use Puppeteer to fetch rendered HTML
+        // Launch Puppeteer to fetch webpage content
         const browser = await puppeteer.launch();
         const page = await browser.newPage();
         await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-        // Get the fully rendered HTML content
-        const html = await page.content();
-        const $ = cheerio.load(html);
-
-        // Check spelling errors in <p> tags
-        const spellingErrors = [];
-        $('p').each((_, el) => {
-            const text = $(el).text();
-            text.split(' ').forEach(word => {
-                const cleanedWord = word.replace(/[^a-zA-Z]/g, '').toLowerCase(); // Normalize words
-                if (cleanedWord && spellchecker.isMisspelled(cleanedWord)) {
-                    spellingErrors.push(cleanedWord);
-                }
-            });
+        // Get text content from the page
+        const textContent = await page.evaluate(() => {
+            return document.body.innerText;
         });
 
         await browser.close();
+
+        // Check for spelling errors
+        const words = textContent.split(/\s+/); // Split text into words
+        const spellingErrors = words.filter((word) => spellchecker.isMisspelled(word));
+
         res.json({ spellingErrors });
     } catch (error) {
-        res.status(500).json({ error: 'Error fetching page content' });
+        console.error(error);
+        res.status(500).json({ error: 'Error fetching or analyzing the page content' });
     }
 });
 
 // Start the server
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
