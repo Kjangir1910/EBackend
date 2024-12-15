@@ -14,6 +14,7 @@
     "backend": "file:",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
+    "puppeteer": "^23.10.4",
     "express": "^4.21.1",
     "spellchecker": "^3.7.1"
   }
