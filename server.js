@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { URL } = require('url');
+const spellchecker = require('spellchecker');
 
 const app = express();
 const PORT = 5000;
@@ -63,27 +64,11 @@ app.post('/check-links', async (req, res) => {
             })
         );
 
-        res.json({ linkStatuses, metaTags });
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching page content' });
-    }
-});
-
-
-const spellchecker = require('spellchecker');
-
-app.post('/check-links', async (req, res) => {
-    const { url } = req.body;
-
-    try {
-        const { data } = await axios.get(url);
-        const $ = cheerio.load(data);
-        
         // Check for spelling errors in text content
         const spellingErrors = [];
         $('p').each((_, el) => {
             const text = $(el).text();
-            text.split(' ').forEach(word => {
+            text.split(/\s+/).forEach((word) => {
                 if (spellchecker.isMisspelled(word)) {
                     spellingErrors.push(word);
                 }
@@ -96,6 +81,5 @@ app.post('/check-links', async (req, res) => {
         res.status(500).json({ error: 'Error fetching page content' });
     }
 });
-
 
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
