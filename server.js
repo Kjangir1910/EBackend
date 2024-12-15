@@ -2,7 +2,6 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { URL } = require('url');
-const spellchecker = require('spellchecker');
 
 const app = express();
 const PORT = 5000;
@@ -64,16 +63,34 @@ app.post('/check-links', async (req, res) => {
             })
         );
 
-        // Check for spelling errors in text content
+        // Check for spelling errors using LanguageTool API
         const spellingErrors = [];
+        const paragraphs = [];
         $('p').each((_, el) => {
-            const text = $(el).text();
-            text.split(/\s+/).forEach((word) => {
-                if (spellchecker.isMisspelled(word)) {
-                    spellingErrors.push(word);
-                }
-            });
+            paragraphs.push($(el).text());
         });
+
+        const apiResponses = await Promise.all(
+            paragraphs.map(async (text) => {
+                try {
+                    const { data } = await axios.post(
+                        'https://api.languagetoolplus.com/v2/check',
+                        new URLSearchParams({
+                            text: text,
+                            language: 'en-US',
+                        }),
+                        {
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        }
+                    );
+                    return data.matches.map((match) => match.context.text);
+                } catch {
+                    return [];
+                }
+            })
+        );
+
+        apiResponses.forEach((errors) => spellingErrors.push(...errors));
 
         // Return results
         res.json({ linkStatuses, metaTags, spellingErrors });
